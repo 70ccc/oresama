@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1a1d3a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="社畜とサキュバス">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="icon" href="assets/icon-192.png">
+<title>社畜とサキュバスの会社経営ゲーム（仮）創業期 試作版</title>
+<link rel="stylesheet" href="css/font.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="rotate"><div class="phone"></div><div>スマホを横にして遊んでね</div><div class="sub">社畜とサキュバスの会社経営ゲーム</div></div>
+<div id="stage">
+  <canvas id="field" width="480" height="270"></canvas>
+  <div id="card"><div id="card-text"></div><div id="card-sub"></div></div>
+  <div id="dark"></div>
+  <div id="fx"></div>
+  <div id="caption"></div>
+
+  <div id="hud" class="win hidden">
+    <div class="tb"><span id="hud-name">■ おれさま商店</span><span class="btns"><span>_</span><span>□</span><span>×</span></span></div>
+    <div class="row"><span id="hud-date">1年目 4月1日（水）</span><span id="hud-time"></span><span id="hud-seiki" class="ask">♥0</span></div>
+    <div class="row"><span><span class="sub">資金</span> <span id="hud-money" class="money">¥0</span></span><span><span class="sub">評判</span> <span id="hud-rep">★☆☆☆☆</span></span></div>
+    <div class="row hidden" id="hud-gauges"></div>
+  </div>
+  <div id="gauges" class="win hidden"></div>
+  <div id="account" class="win hidden">
+    <div class="tb"><span>■ 肇の口座</span><span class="btns"><span>_</span><span>□</span><span>×</span></span></div>
+    <div class="row"><span><span class="sub">残高</span> <span id="account-val" class="money">¥0</span></span></div>
+  </div>
+  <div id="missions" class="win hidden">
+    <div class="tb"><span>■ ミッション</span><span class="btns"><span>_</span><span>□</span><span>×</span></span></div>
+    <div id="mission-list"></div>
+  </div>
+  <div id="hint" class="win hidden"></div>
+  <div id="menu" class="hidden"></div>
+  <div id="placebar" class="win"><span class="sub" id="placebar-text">置きたい床をタップ。もう一度タップで置く</span><button class="pbtn" id="pb-flip">向きを変える</button><button class="pbtn" id="pb-cancel">やめる</button></div>
+  <div id="timebar" class="win hidden">
+    <span id="clock">10:00</span>
+    <button data-speed="0">||</button><button data-speed="1">▷</button><button data-speed="2">▷▷</button><button data-speed="3">▷▷▷</button><button id="tb-skip" title="閉店まで一気に進める">結果へ ⏭</button>
+  </div>
+
+  <div id="portraits"><img id="p-hajime" src="assets/hajime_base.png" alt=""><img id="p-xiao" src="assets/xiao_base.png" alt=""></div>
+  <div id="dialog" class="win hidden">
+    <div id="face"></div>
+    <div id="nametag"></div>
+    <div id="dlg-btns"><button id="dlg-log">ログ</button><button id="dlg-skip">早送り</button></div>
+    <div id="dtext"></div>
+    <div id="dnext">▼</div>
+  </div>
+  <div id="choices" class="hidden"></div>
+  <div id="guide" class="win hidden">
+    <div class="tb"><span>■ ガイド</span><span class="btns"><span>×</span></span></div>
+    <div id="guide-text"></div>
+    <div id="guide-ok">▼ OK（クリック／Enter）</div>
+  </div>
+  <div id="panel" class="win hidden"></div>
+  <div id="tip" class="hidden"></div>
+  <div id="toast"></div>
+  <div id="log" class="win hidden"><div class="tb"><span>■ ログ（Lで閉じる）</span></div><div id="log-body"></div></div>
+  <div id="se"></div>
+
+  <div id="title">
+    <div id="title-box" class="win">
+      <div class="tb"><span>■ 社畜とサキュバスの会社経営ゲーム（仮）</span><span class="btns"><span>_</span><span>□</span><span>×</span></span></div>
+      <div class="title-main">社畜とサキュバスの<br>会社経営ゲーム（仮）</div>
+      <div class="title-sub">創業期　試作版</div>
+      <div class="title-btns">
+        <button id="btn-continue" class="hidden">つづきから</button>
+        <button id="btn-prologue">プロローグから</button>
+        <button id="btn-ch1">第1章から（プロローグを飛ばす）</button>
+      </div>
+      <div class="title-help mouse-only">会話：クリックかEnter／Ctrlを押している間スキップ／Lでログ／右上の ♪ でBGMの音量<br>設置：クリックで置く／Rで向きを変える／右クリックかEscでやめる<br>営業中：スペースで一時停止、1・2・3で速さ</div>
+      <div class="title-help touch-only">会話：タップで進む／会話窓の上の「早送り」「ログ」／右上の ♪ でBGMの音量<br>設置：置きたい床をタップ、もう一度タップで置く／右下の「向きを変える」「やめる」<br>営業中：右下のボタンで一時停止と速さ<span id="a2hs" class="hidden"><br><span class="ask">ブラウザの「ホーム画面に追加」で、全画面のアプリとして遊べる</span></span></div>
+    </div>
+  </div>
+  <button id="bgm-btn" title="BGMの音量">♪ 中</button>
+  <div id="loading">読み込み中……</div>
+</div>
+<script src="js/atlas.js"></script>
+<script src="js/data.js"></script>
+<script src="js/script.js"></script>
+<script src="js/script2.js"></script>
+<script src="js/script3.js"></script>
+<script src="js/script4.js"></script>
+<script src="js/script5.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/bgm.js"></script>
+<script src="js/kit.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/field.js"></script>
+<script src="js/shelf.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/forms.js"></script>
+<script src="js/night.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/events.js"></script>
+<script src="js/events5.js"></script>
+<script src="js/story.js"></script>
+</body>
+</html>
