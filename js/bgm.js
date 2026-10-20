@@ -36,8 +36,11 @@ window.BGM = (() => {
   // 再生機は2台だけ（A/B）。曲の切り替えとループのつなぎ目は、2台でクロスフェードする
   // iPhone は audio の音量をページから変えられず、最初のタップで鳴らした再生機しか後から鳴らせないので、
   // https で開いたときは Web Audio の音量（GainNode）を使い、最初のタップで2台とも鳴らせる状態にしておく
+  // Web Audio の音は iPhone のマナーモードで消える。iOS 17 からは「音楽アプリと同じ扱い」にできるので、
+  // それより古い iPhone では Web Audio を使わず、audio だけで鳴らす（音量は変えられないが、マナーモードでも鳴る）
   const AC = window.AudioContext || window.webkitAudioContext;
-  const useWA = !!AC && location.protocol.startsWith('http');
+  const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const useWA = !!AC && location.protocol.startsWith('http') && (!IOS || 'audioSession' in navigator);
   let ctx = null;
   const info = {};         // 曲の名前 → { ext, ok, missing, pos }
   const trackInfo = name => (info[name] = info[name] || { ext: 0, ok: false, missing: false, pos: null });
@@ -45,7 +48,7 @@ window.BGM = (() => {
   const loopStart = name => (B.TRACKS[name] && B.TRACKS[name].loop ? B.TRACKS[name].loop[0] : 0);
   const loopEnd = (name, el) => (B.TRACKS[name] && B.TRACKS[name].loop ? B.TRACKS[name].loop[1] : el.duration);
   const mkDeck = () => {
-    const d = { el: new Audio(), gain: null, track: null, v: 0, target: 0, seekTo: null, src: '' };
+    const d = { el: new Audio(), gain: null, track: null, v: 0, target: 0, seekTo: null, src: '', primed: false, priming: false };
     d.el.preload = 'auto';
     d.el.addEventListener('loadedmetadata', () => { if (d.seekTo != null) { try { d.el.currentTime = d.seekTo; } catch (e) { /* 無視 */ } d.seekTo = null; } });
     d.el.addEventListener('canplay', () => { if (d.track) { trackInfo(d.track).ok = true; refreshButton(); } });
@@ -60,15 +63,19 @@ window.BGM = (() => {
   };
   const decks = [mkDeck(), mkDeck()];
   let cur = 0;   // いま主に鳴らしている再生機
-  const setV = (d, v) => { d.v = Math.max(0, Math.min(1, v)); if (d.gain) d.gain.gain.value = d.v; else d.el.volume = d.v; };
+  // audio だけで鳴らしているときは、音量0を「消音」にもする（iPhone は volume を無視するが muted は効く）
+  const mute = d => { d.el.muted = !d.gain && d.v <= 0.001; };
+  const setV = (d, v) => { d.v = Math.max(0, Math.min(1, v)); if (d.gain) d.gain.gain.value = d.v; else d.el.volume = d.v; mute(d); };
+  // Web Audio につなぐのは、音が本当に出せる状態（running）になってから。つないだあとに止まったままだと無音になるため
   const attach = d => {
-    if (!useWA || !ctx || d.gain) return;
+    if (!useWA || !ctx || ctx.state !== 'running' || d.gain) return;
     try {
       const src = ctx.createMediaElementSource(d.el);
       d.gain = ctx.createGain();
       d.gain.gain.value = d.v;
       src.connect(d.gain).connect(ctx.destination);
       d.el.volume = 1;
+      mute(d);
     } catch (e) { d.gain = null; }
   };
   const load = (d, name, at) => {
@@ -80,7 +87,7 @@ window.BGM = (() => {
   const start = d => {
     if (!unlocked || vol() <= 0 || !d.track || trackInfo(d.track).missing) return;
     const pr = d.el.play();
-    if (pr && pr.catch) pr.catch(() => { /* まだ鳴らせない。次のタップでもう一度 */ unlocked = false; });
+    if (pr && pr.then) pr.then(() => { d.primed = true; }, () => { /* まだ鳴らせない。次のタップでもう一度 */ unlocked = false; });
   };
 
   // ---------------------------------------------------------------- 切り替え
@@ -116,7 +123,7 @@ window.BGM = (() => {
     for (const d of decks) {
       const goal = d.target * vol();
       if (Math.abs(d.v - goal) > 0.001) setV(d, goal > d.v ? Math.min(goal, d.v + step * Math.max(vol(), 0.05)) : Math.max(goal, d.v - step * Math.max(vol(), 0.05)));
-      if (goal === 0 && d.v <= 0.001 && !d.el.paused) d.el.pause();
+      if (goal === 0 && d.v <= 0.001 && !d.el.paused && !d.priming) d.el.pause();
     }
     const d = decks[cur];
     if (!current || d.track !== current || trackInfo(current).missing) return;
@@ -167,27 +174,37 @@ window.BGM = (() => {
     B.play(n);
   }, 250);
 
-  // ---------------------------------------------------------------- 最初のクリックで音を出せるようにする（ブラウザの決まり）
+  // ---------------------------------------------------------------- タップで音を出せるようにする（ブラウザの決まり）
+  // スマホで「音を出していい」と認められるのは、指を離したとき（touchend・click）。指を置いた瞬間（pointerdown）ではだめ
+  // 一度で鳴らせなかったときのために、タップのたびに足りないところだけやり直す
+  const setSession = () => { try { if ('audioSession' in navigator) navigator.audioSession.type = 'playback'; } catch (e) { /* 無視 */ } };
+  setSession();
+  const route = () => { for (const d of decks) attach(d); };
   const unlock = () => {
-    if (unlocked) return;
     unlocked = true;
+    setSession();
     if (useWA) {
-      try { ctx = ctx || new AC(); if (ctx.state === 'suspended') ctx.resume(); } catch (e) { ctx = null; }
-      for (const d of decks) attach(d);
+      try {
+        if (!ctx) { ctx = new AC(); ctx.addEventListener('statechange', route); }
+        if (ctx.state !== 'running') { const p = ctx.resume(); if (p && p.then) p.then(route, () => { /* 次のタップで */ }); }
+        route();
+      } catch (e) { /* Web Audio が使えなくても、audio だけで鳴らす */ }
     }
     // 2台とも、タップの中で一度鳴らしておく（iPhone はこうしないと、あとから鳴らせない）
     for (const d of decks) {
-      if (d === decks[cur] && d.target > 0) { start(d); continue; }
+      const main = d === decks[cur] && d.target > 0;
+      if (d.primed) { if (main && d.el.paused) start(d); continue; }
+      if (main) { start(d); continue; }
       if (!d.src && current) load(d, current, loopStart(current));
       if (!d.src) continue;
-      setV(d, 0);
+      d.el.muted = true;
+      d.priming = true;
       const pr = d.el.play();
-      if (pr && pr.then) pr.then(() => { if (d.target === 0) d.el.pause(); }).catch(() => { /* 無視 */ });
+      if (pr && pr.then) pr.then(() => { d.priming = false; d.primed = true; if (d.target === 0) d.el.pause(); mute(d); }, () => { d.priming = false; mute(d); });
+      else d.priming = false;
     }
   };
-  addEventListener('pointerdown', unlock, true);
-  addEventListener('touchend', unlock, true);
-  addEventListener('keydown', unlock, true);
+  for (const t of ['touchend', 'pointerup', 'click', 'mousedown', 'keydown']) addEventListener(t, unlock, true);
   // アプリを裏に回したら止める、戻ったら続ける
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { for (const d of decks) d.el.pause(); if (ctx && ctx.state === 'running') ctx.suspend(); }
